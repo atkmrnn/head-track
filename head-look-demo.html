@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Head Look Demo</title>
+<style>
+  :root {
+    --ink: #e9f1ee;
+    --dim: #9fb3ad;
+    --panel: rgba(14, 22, 24, 0.82);
+    --line: rgba(233, 241, 238, 0.16);
+    --accent: #7fe3c1;
+    --warn: #ffb36b;
+    --bad: #ff7a7a;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #0d1416; color: var(--ink); font-family: var(--sans); -webkit-tap-highlight-color: transparent; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* crosshair */
+  #cross { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; }
+  #cross::before, #cross::after { content: ""; position: absolute; background: rgba(255,255,255,.75); }
+  #cross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #cross::after { top: 8px; left: 0; height: 2px; width: 18px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+  #hud {
+    position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); top: calc(10px + env(safe-area-inset-top, 0px));
+    padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.55; font-variant-numeric: tabular-nums; min-width: 190px; max-width: calc(100vw - 150px);
+  }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+  #hud .k { color: var(--dim); }
+  #status { font-family: var(--sans); font-weight: 600; margin-bottom: 4px; }
+  #status.ok { color: var(--accent); } #status.warn { color: var(--warn); } #status.bad { color: var(--bad); }
+
+  #camwrap {
+    position: fixed; right: calc(10px + env(safe-area-inset-right, 0px)); top: calc(10px + env(safe-area-inset-top, 0px));
+    width: 112px; aspect-ratio: 3 / 4; border-radius: 10px; overflow: hidden; border: 2px solid var(--line); background: #000;
+  }
+  #camwrap.ok { border-color: var(--accent); } #camwrap.lost { border-color: var(--bad); }
+  #cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+
+  #controls {
+    position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 10px 12px; display: grid; gap: 8px; font-size: 13px;
+    max-width: 520px; margin: 0 auto;
+  }
+  #controls .slider { display: grid; grid-template-columns: 5.5em 1fr 3.2em; align-items: center; gap: 8px; }
+  #controls .slider output { font-family: var(--mono); text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #controls input[type=range] { width: 100%; accent-color: var(--accent); }
+  #controls .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit; color: var(--ink); background: rgba(255,255,255,.08); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer;
+  }
+  button:hover { background: rgba(255,255,255,.14); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); color: #0b201a; border-color: transparent; font-weight: 700; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #toggleControls { position: fixed; right: calc(10px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+
+  #start {
+    position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 12, 13, .72);
+    padding: 16px max(16px, env(safe-area-inset-left, 0px));
+  }
+  #start .card { max-width: 420px; padding: 22px 20px; display: grid; gap: 12px; }
+  #start h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
+  #start p { margin: 0; color: var(--dim); line-height: 1.6; font-size: 14px; }
+  #start .btns { display: grid; gap: 8px; margin-top: 6px; }
+  #start .note { font-size: 12px; }
+  #start .err { color: var(--bad); font-size: 13px; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="cross"></div>
+
+<div id="hud" class="panel" hidden>
+  <div id="status" class="warn">準備中…</div>
+  <div class="row"><span class="k">頭 ヨー</span><span id="hYaw">–</span></div>
+  <div class="row"><span class="k">頭 ピッチ</span><span id="hPitch">–</span></div>
+  <div class="row"><span class="k">頭 ロール</span><span id="hRoll">–</span></div>
+  <div class="row"><span class="k">頭 左右/上下/前後</span><span id="hPos">–</span></div>
+  <div class="row"><span class="k">視線角 左右/上下</span><span id="ray">–</span></div>
+  <div class="row"><span class="k">視点 ヨー</span><span id="vYaw">–</span></div>
+  <div class="row"><span class="k">視点 ピッチ</span><span id="vPitch">–</span></div>
+  <div class="row"><span class="k">検出</span><span id="fps">–</span></div>
+</div>
+
+<div id="camwrap" hidden><video id="cam" playsinline muted autoplay></video></div>
+
+<div id="controls" class="panel" hidden>
+  <div class="slider"><label for="gain">倍率</label><input id="gain" type="range" min="1" max="8" step="0.5" value="4"><output id="gainOut">4.0×</output></div>
+  <div class="slider"><label for="dz">デッドゾーン</label><input id="dz" type="range" min="0" max="10" step="0.5" value="2"><output id="dzOut">2.0°</output></div>
+  <div class="slider"><label for="smooth">なめらかさ</label><input id="smooth" type="range" min="0" max="100" step="1" value="60"><output id="smoothOut">60</output></div>
+  <div class="slider"><label for="tgain">移動倍率</label><input id="tgain" type="range" min="0" max="15" step="0.5" value="5"><output id="tgainOut">5.0×</output></div>
+  <div class="slider"><label for="corrY">上下補正</label><input id="corrY" type="range" min="-50" max="150" step="5" value="100"><output id="corrYOut">100%</output></div>
+  <div class="slider"><label for="corrX">左右補正</label><input id="corrX" type="range" min="-50" max="150" step="5" value="100"><output id="corrXOut">100%</output></div>
+  <div class="btns">
+    <button id="calib" class="primary">正面を再設定</button>
+    <button id="six" aria-pressed="true">6DoF</button>
+    <button id="invX" aria-pressed="false">左右反転</button>
+    <button id="invY" aria-pressed="false">上下反転</button>
+    <button id="hide">閉じる</button>
+  </div>
+</div>
+<button id="toggleControls" hidden>設定</button>
+
+<div id="start">
+  <div class="card panel">
+    <h1>ヘッドトラッキング視点デモ</h1>
+    <p>内カメラで顔の向きを読み取り、3D空間の視点を動かします。首を少し振るだけで、視点は大きく回ります。体を左右に傾けたり顔を近づけたりすると、目の前の壁の向こうを覗き込めます（6DoF）。</p>
+    <p class="note">映像は端末の中だけで処理され、どこにも送信されません。スマホを顔の正面、30〜50cmくらいの距離で持つと安定します。</p>
+    <div class="btns">
+      <button id="startCam" class="primary">カメラで始める</button>
+      <button id="startDrag">カメラなしで試す（ドラッグで操作）</button>
+    </div>
+    <p id="startErr" class="err" hidden></p>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+const MP_VER = "0.10.14";
+const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- 3D scene ---------- */
+const canvas = $("scene");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fc7d6);
+scene.fog = new THREE.Fog(0x9fc7d6, 30, 120);
+
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+camera.position.set(0, 1.6, 0);
+camera.rotation.order = "YXZ";
+
+scene.add(new THREE.HemisphereLight(0xdff3ff, 0x5a6b4a, 0.9));
+const sun = new THREE.DirectionalLight(0xfff1d6, 1.4);
+sun.position.set(30, 50, 20);
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(200, 64),
+  new THREE.MeshLambertMaterial({ color: 0x7d9b6a })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+const grid = new THREE.GridHelper(200, 100, 0x5f7d50, 0x6d8b5d);
+grid.position.y = 0.01;
+scene.add(grid);
+
+// ring of pillars so rotation is easy to see
+const palette = [0xe86a5c, 0xf2b84b, 0x6cc4a1, 0x5b8fd9, 0xb07cd8, 0xf08fb6];
+for (let i = 0; i < 24; i++) {
+  const a = (i / 24) * Math.PI * 2;
+  const h = 2 + ((i * 7) % 5) * 1.2;
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(1.4, h, 1.4),
+    new THREE.MeshLambertMaterial({ color: palette[i % palette.length] })
+  );
+  m.position.set(Math.sin(a) * 18, h / 2, -Math.cos(a) * 18);
+  scene.add(m);
+}
+
+// compass labels
+function label(text, color) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d");
+  g.fillStyle = color; g.beginPath(); g.arc(128, 128, 110, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#fff"; g.font = "bold 130px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, 128, 138);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) }));
+  s.scale.set(4, 4, 1);
+  return s;
+}
+[["北", 0, "#d9534f"], ["東", 90, "#3b7dd8"], ["南", 180, "#3b7dd8"], ["西", 270, "#3b7dd8"]].forEach(([t, deg, col]) => {
+  const s = label(t, col);
+  const a = deg * D2R;
+  s.position.set(Math.sin(a) * 30, 6, -Math.cos(a) * 30);
+  scene.add(s);
+});
+
+// floating things overhead and nearby
+const floaters = [];
+for (let i = 0; i < 10; i++) {
+  const m = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.8, 0),
+    new THREE.MeshLambertMaterial({ color: palette[i % palette.length], flatShading: true })
+  );
+  const a = (i / 10) * Math.PI * 2 + 0.3;
+  m.position.set(Math.sin(a) * 8, 5 + (i % 3) * 2.5, -Math.cos(a) * 8);
+  scene.add(m); floaters.push(m);
+}
+// nearby objects in front: leaning around them shows the translation (parallax / peeking)
+const wood = new THREE.MeshLambertMaterial({ color: 0x8a5a3b });
+const wall = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 0.3), new THREE.MeshLambertMaterial({ color: 0xd8d2c4 }));
+wall.position.set(0, 1.2, -3.2);
+scene.add(wall);
+for (const x of [-1.6, 1.6]) {
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.1, 0.15), wood);
+  post.position.set(x, 0.55, -2.2);
+  scene.add(post);
+}
+const rail = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.1, 0.1), wood);
+rail.position.set(0, 1.1, -2.2);
+scene.add(rail);
+const target = new THREE.Mesh(new THREE.TorusKnotGeometry(0.5, 0.18, 80, 12), new THREE.MeshLambertMaterial({ color: 0xf2b84b }));
+target.position.set(0, 1.6, -6.5);
+scene.add(target);
+floaters.push(target);
+
+const sunBall = new THREE.Mesh(new THREE.SphereGeometry(3, 24, 16), new THREE.MeshBasicMaterial({ color: 0xfff3c4 }));
+sunBall.position.set(20, 45, -40);
+scene.add(sunBall);
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+resize();
+
+/* ---------- filtering ---------- */
+class LowPass { constructor() { this.y = null; } f(x, a) { this.y = this.y === null ? x : a * x + (1 - a) * this.y; return this.y; } }
+class OneEuro {
+  constructor(minCutoff = 1, beta = 0.01, dCutoff = 1) { this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff; this.x = new LowPass(); this.dx = new LowPass(); this.t = null; }
+  alpha(cutoff, dt) { const tau = 1 / (2 * Math.PI * cutoff); return 1 / (1 + tau / dt); }
+  filter(v, tMs) {
+    if (this.t === null) { this.t = tMs; this.dx.f(0, 1); return this.x.f(v, 1); }
+    const dt = Math.max(1e-3, (tMs - this.t) / 1000); this.t = tMs;
+    const d = (v - this.x.y) / dt;
+    const ed = this.dx.f(d, this.alpha(this.dCutoff, dt));
+    const cutoff = this.minCutoff + this.beta * Math.abs(ed);
+    return this.x.f(v, this.alpha(cutoff, dt));
+  }
+  reset() { this.x = new LowPass(); this.dx = new LowPass(); this.t = null; }
+}
+const fYaw = new OneEuro(), fPitch = new OneEuro();
+const fX = new OneEuro(), fY = new OneEuro(), fZ = new OneEuro();
+const allFilters = [fYaw, fPitch, fX, fY, fZ];
+
+/* ---------- settings ---------- */
+const S = { gain: 4, dz: 2, smooth: 60, tgain: 5, corrX: 100, corrY: 100, six: true, invX: false, invY: false };
+function applySmooth() {
+  // 0 = raw/fast, 100 = very smooth
+  const minCutoff = 3 - (S.smooth / 100) * 2.8;
+  allFilters.forEach((f) => { f.minCutoff = minCutoff; f.beta = 0.02; });
+}
+function bindSlider(id, key, fmt) {
+  const el = $(id), out = $(id + "Out");
+  const upd = () => { S[key] = parseFloat(el.value); out.textContent = fmt(S[key]); if (key === "smooth") applySmooth(); };
+  el.addEventListener("input", upd); upd();
+}
+bindSlider("gain", "gain", (v) => v.toFixed(1) + "×");
+bindSlider("dz", "dz", (v) => v.toFixed(1) + "°");
+bindSlider("smooth", "smooth", (v) => String(v));
+bindSlider("tgain", "tgain", (v) => v.toFixed(1) + "×");
+bindSlider("corrX", "corrX", (v) => v.toFixed(0) + "%");
+bindSlider("corrY", "corrY", (v) => v.toFixed(0) + "%");
+function bindToggle(id, key) {
+  $(id).addEventListener("click", () => { S[key] = !S[key]; $(id).setAttribute("aria-pressed", String(S[key])); });
+}
+bindToggle("six", "six");
+bindToggle("invX", "invX");
+bindToggle("invY", "invY");
+$("hide").addEventListener("click", () => { $("controls").hidden = true; $("toggleControls").hidden = false; });
+$("toggleControls").addEventListener("click", () => { $("controls").hidden = false; $("toggleControls").hidden = true; });
+
+/* ---------- view state ---------- */
+let viewYaw = 0, viewPitch = 0;      // radians, applied to camera
+let targetYaw = 0, targetPitch = 0;
+const EYE = new THREE.Vector3(0, 1.6, 0);
+const pos = new THREE.Vector3(), targetPos = new THREE.Vector3(); // head offset in the viewer's local frame (m)
+let mode = null;                       // "camera" | "drag"
+
+function mapAxis(deltaDeg) {
+  const a = Math.abs(deltaDeg) - S.dz;
+  if (a <= 0) return 0;
+  return Math.sign(deltaDeg) * a * S.gain;
+}
+
+/* ---------- drag fallback ---------- */
+let dragging = false, lx = 0, ly = 0;
+canvas.addEventListener("pointerdown", (e) => { if (!mode || (mode === "camera" && landmarker)) return; dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  targetYaw += (e.clientX - lx) * 0.005;
+  targetPitch = THREE.MathUtils.clamp(targetPitch + (e.clientY - ly) * 0.005, -1.4, 1.4);
+  lx = e.clientX; ly = e.clientY;
+});
+canvas.addEventListener("pointerup", () => { dragging = false; });
+canvas.addEventListener("pointercancel", () => { dragging = false; });
+
+/* ---------- face tracking ---------- */
+const video = $("cam");
+let landmarker = null;
+let needCalib = true;
+const neutral = { yaw: 0, pitch: 0, x: 0, y: 0, z: 0 };
+const head = { yaw: 0, pitch: 0, roll: 0, x: 0, y: 0, z: 0 }; // translation in cm (MediaPipe face model units)
+let lastVideoTime = -1, lastSeen = 0, detCount = 0, detFps = 0, fpsT = performance.now();
+const m4 = new THREE.Matrix4(), eul = new THREE.Euler();
+
+$("calib").addEventListener("click", () => { needCalib = true; allFilters.forEach((f) => f.reset()); });
+
+function setStatus(text, cls) { const s = $("status"); s.textContent = text; s.className = cls; }
+
+function withTimeout(p, ms, what) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + "が " + ms / 1000 + " 秒以内に終わりませんでした")), ms))]);
+}
+
+async function startCamera() {
+  const err = $("startErr");
+  err.hidden = true;
+  if (!window.isSecureContext) {
+    err.textContent = "このページは https:// か localhost で開く必要があります（カメラの制限）。";
+    err.hidden = false; return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    err.textContent = "このブラウザはカメラに対応していません。";
+    err.hidden = false; return;
+  }
+  $("startCam").disabled = true;
+  $("startCam").textContent = "カメラを起動中…";
+
+  // 1) camera — the start dialog closes as soon as this succeeds
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+    });
+    video.srcObject = stream;
+    video.play().catch(() => {}); // don't block on play(); some browsers resolve it late
+  } catch (e) {
+    console.error(e);
+    err.textContent = e?.name === "NotAllowedError"
+      ? "カメラの使用が許可されませんでした。ブラウザの設定でカメラを許可してから、もう一度お試しください。"
+      : "カメラを起動できませんでした: " + (e?.message || e);
+    err.hidden = false;
+    $("startCam").disabled = false;
+    $("startCam").textContent = "カメラで始める";
+    return;
+  }
+
+  mode = "camera";
+  $("start").hidden = true;
+  $("hud").hidden = false;
+  $("camwrap").hidden = false;
+  $("controls").hidden = false;
+
+  // 2) face model — progress shown in the HUD; drag works meanwhile
+  try {
+    setStatus("ライブラリを読み込み中… (1/3)", "warn");
+    const { FaceLandmarker, FilesetResolver } = await withTimeout(import(`${MP_BASE}/vision_bundle.mjs`), 30000, "ライブラリの読み込み");
+    setStatus("認識エンジンを準備中… (2/3)", "warn");
+    const fileset = await withTimeout(FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`), 30000, "認識エンジンの準備");
+    const opts = (delegate) => ({
+      baseOptions: { modelAssetPath: MODEL_URL, delegate },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFacialTransformationMatrixes: true,
+      outputFaceBlendshapes: false
+    });
+    setStatus("顔モデルを読み込み中… (3/3)", "warn");
+    try { landmarker = await withTimeout(FaceLandmarker.createFromOptions(fileset, opts("GPU")), 20000, "GPUでの初期化"); }
+    catch (e) {
+      console.warn("GPU failed, falling back to CPU", e);
+      setStatus("顔モデルを読み込み中… (CPU)", "warn");
+      landmarker = await withTimeout(FaceLandmarker.createFromOptions(fileset, opts("CPU")), 30000, "顔モデルの読み込み");
+    }
+    setStatus("顔を探しています…", "warn");
+  } catch (e) {
+    console.error(e);
+    setStatus("顔認識を起動できませんでした: " + (e?.message || e) + "（ドラッグ操作は使えます）", "bad");
+  }
+}
+
+function startDrag() {
+  mode = "drag";
+  $("start").hidden = true;
+  $("hud").hidden = false;
+  setStatus("ドラッグで見回せます", "ok");
+}
+$("startCam").addEventListener("click", startCamera);
+$("startDrag").addEventListener("click", startDrag);
+
+function track(now) {
+  if (!landmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  const res = landmarker.detectForVideo(video, now);
+  detCount++;
+  const mats = res.facialTransformationMatrixes;
+  if (mats && mats.length) {
+    m4.fromArray(mats[0].data);            // column-major 4x4
+    eul.setFromRotationMatrix(m4, "YXZ");
+    const d = mats[0].data;                 // translation lives in elements 12..14 (cm, camera space)
+    head.x = d[12]; head.y = d[13]; head.z = d[14];
+    // Line-of-sight correction: the estimated rotation is roughly relative to the camera→face ray,
+    // so moving off-axis (e.g. raising your head) reads as turning. Subtract the ray's angle.
+    const dist = Math.max(1, Math.abs(head.z));
+    const rayYaw = Math.atan2(head.x, dist) * R2D;
+    const rayPitch = Math.atan2(head.y, dist) * R2D;
+    head.rayYaw = rayYaw; head.rayPitch = rayPitch;
+    head.yaw = eul.y * R2D - (S.corrX / 100) * rayYaw;
+    head.pitch = eul.x * R2D + (S.corrY / 100) * rayPitch;
+    head.roll = eul.z * R2D;
+    lastSeen = now;
+    if (needCalib) { Object.assign(neutral, { yaw: head.yaw, pitch: head.pitch, x: head.x, y: head.y, z: head.z }); needCalib = false; }
+
+    const dy = fYaw.filter(head.yaw - neutral.yaw, now);
+    const dp = fPitch.filter(head.pitch - neutral.pitch, now);
+    const sx = S.invX ? -1 : 1, sy = S.invY ? -1 : 1;
+    targetYaw = THREE.MathUtils.clamp(sx * mapAxis(dy), -170, 170) * D2R;
+    targetPitch = THREE.MathUtils.clamp(-sy * mapAxis(dp), -80, 80) * D2R;
+
+    // translation: cm of head movement -> metres in the scene, times the gain
+    const tx = fX.filter(head.x - neutral.x, now);
+    const ty = fY.filter(head.y - neutral.y, now);
+    const tz = fZ.filter(head.z - neutral.z, now);
+    const g = S.tgain / 100;
+    if (S.six) {
+      targetPos.set(
+        THREE.MathUtils.clamp(-sx * tx * g, -1.5, 1.5),  // camera image is unmirrored: your right = -x
+        THREE.MathUtils.clamp(sy * ty * g, -0.8, 0.8),
+        THREE.MathUtils.clamp(-tz * g, -1.5, 1.5)        // closer to the phone = forward (-z)
+      );
+    } else targetPos.set(0, 0, 0);
+  }
+}
+
+function updateHud(now) {
+  if (now - fpsT > 1000) { detFps = detCount * 1000 / (now - fpsT); detCount = 0; fpsT = now; }
+  const f = (v) => (v >= 0 ? "+" : "") + v.toFixed(1) + "°";
+  $("vYaw").textContent = f(viewYaw * R2D);
+  $("vPitch").textContent = f(viewPitch * R2D);
+  if (mode !== "camera" || !landmarker) { ["hYaw", "hPitch", "hRoll", "hPos", "ray", "fps"].forEach((id) => ($(id).textContent = "–")); return; }
+  $("hYaw").textContent = f(head.yaw - neutral.yaw);
+  $("hPitch").textContent = f(head.pitch - neutral.pitch);
+  $("hRoll").textContent = f(head.roll);
+  $("ray").textContent = `${f(head.rayYaw || 0)} ${f(head.rayPitch || 0)}`;
+  const c = (v) => (v >= 0 ? "+" : "") + v.toFixed(0);
+  $("hPos").textContent = `${c(head.x - neutral.x)} ${c(head.y - neutral.y)} ${c(head.z - neutral.z)} cm`;
+  $("fps").textContent = detFps.toFixed(0) + " fps";
+  const seen = now - lastSeen < 300;
+  $("camwrap").className = seen ? "ok" : "lost";
+  if (seen) setStatus("トラッキング中", "ok");
+  else if (lastSeen) setStatus("顔を見失いました", "bad");
+}
+
+/* ---------- loop ---------- */
+let prev = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - prev) / 1000); prev = now;
+  if (mode === "camera") {
+    track(now);
+    // after ~1s without a face, drift back to center
+    if (lastSeen && now - lastSeen > 1000) { targetYaw *= 0.97; targetPitch *= 0.97; targetPos.multiplyScalar(0.97); }
+  }
+  const k = (mode === "camera" && landmarker) ? 1 - Math.pow(0.0005, dt) : 1; // light extra easing for head input
+  viewYaw += (targetYaw - viewYaw) * k;
+  viewPitch += (targetPitch - viewPitch) * k;
+  pos.lerp(targetPos, k);
+  camera.rotation.y = viewYaw;
+  camera.rotation.x = viewPitch;
+  // head offset is relative to the "seat" (facing north), like TrackIR/opentrack in a sim
+  camera.position.copy(EYE).add(pos);
+
+  floaters.forEach((m, i) => { m.rotation.x += dt * 0.6; m.rotation.y += dt * (0.4 + i * 0.05); });
+  renderer.render(scene, camera);
+  if (mode) updateHud(now);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
